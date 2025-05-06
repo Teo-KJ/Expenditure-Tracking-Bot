@@ -37,7 +37,7 @@ var Questions = []string{
 // Currencies array
 var Currencies = []string{"USD", "CNY", "JPY", "SGD", "MYR"}
 
-var QuickInput = []string{"Daily transport expenses"}
+var QuickInput = []string{"Daily transport expenses", "Dinner for the family"}
 var TransactionCategory = []string{"Transport", "Food", "Fitness and Entertainment", "Travel", "Other"}
 
 // NewUserSession creates a new user session.
