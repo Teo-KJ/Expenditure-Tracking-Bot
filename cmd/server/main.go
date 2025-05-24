@@ -142,14 +142,16 @@ func main() {
 		log.Fatalf("Error unmarshalling YAML: %v", err)
 	}
 
-	// Initialize Database
-	// Assuming storage.InitDB takes config.DatabaseConfig
-	err = storage.InitDB(cfg.Database)
-	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err) // Changed from Panic to Fatalf for consistency
+	if storage.UseDBToSave {
+		// Initialize Database
+		// Assuming storage.InitDB takes config.DatabaseConfig
+		err = storage.InitDB(cfg.Database)
+		if err != nil {
+			log.Fatalf("Failed to initialize database: %v", err) // Changed from Panic to Fatalf for consistency
+		}
+		defer storage.CloseDB()
+		log.Println("Database initialized successfully.")
 	}
-	defer storage.CloseDB()
-	log.Println("Database initialized successfully.")
 
 	// --- Register Handlers ---
 	http.HandleFunc("/health", healthCheckHandler)
