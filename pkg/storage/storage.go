@@ -156,3 +156,55 @@ func GetAllTransactionsFromDB(categoryFilter string, isClaimableFilter *bool, pa
 	log.Printf("Successfully retrieved %d transactions from the database with applied filters.", len(transactions))
 	return transactions, nil
 }
+
+// GetTransactionCountByCategory retrieves the total number of transactions for each category.
+func GetTransactionCountByCategory() (map[string]float32, error) {
+	querySQL := `
+		SELECT
+			category,
+			SUM(amount) AS total_cost
+		FROM
+			transactions
+		GROUP BY
+			category
+		ORDER BY
+			total_cost DESC;
+    `
+	categoryCounts := make(map[string]float32)
+
+	currentDB, err := GetDB()
+	if err != nil {
+		log.Printf("Error getting DB connection for category count: %v", err)
+		return nil, fmt.Errorf("failed to get DB connection: %w", err)
+	}
+
+	rows, err := currentDB.Query(querySQL)
+	if err != nil {
+		log.Printf("Error querying transaction counts by category: %v (SQL: %s)", err, querySQL)
+		return nil, fmt.Errorf("database query for category counts failed: %w", err)
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Error closing rows for category count: %v", err)
+		}
+	}(rows)
+
+	for rows.Next() {
+		var category string
+		var count float32
+		if err := rows.Scan(&category, &count); err != nil {
+			log.Printf("Error scanning category count row: %v", err)
+			return nil, fmt.Errorf("failed to scan category count row: %w", err)
+		}
+		categoryCounts[category] = count
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating category count rows: %v", err)
+		return nil, fmt.Errorf("error during category count row iteration: %w", err)
+	}
+
+	log.Printf("Successfully retrieved transaction counts for %d categories.", len(categoryCounts))
+	return categoryCounts, nil
+}

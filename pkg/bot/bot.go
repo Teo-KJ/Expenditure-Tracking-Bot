@@ -1,11 +1,18 @@
 package bot
 
 import (
+	"errors"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"main/pkg/session"
 	"main/pkg/storage"
+	"strings"
+)
+
+const (
+	addOption                 = "/add"
+	transactionsSummaryOption = "/summary"
 )
 
 // Map to track ongoing sessions (active users)
@@ -52,7 +59,7 @@ func (b *Bot) StartListening(userSessions map[int64]*session.UserSession) {
 func (b *Bot) handleTextMessage(message *tgbotapi.Message, userSessions map[int64]*session.UserSession) error {
 	chatID := message.Chat.ID
 
-	if message.Text == "/add" {
+	/*if message.Text == addOption {
 		return b.startSession(chatID, userSessions)
 	}
 
@@ -60,9 +67,65 @@ func (b *Bot) handleTextMessage(message *tgbotapi.Message, userSessions map[int6
 		return b.handleAnswer(chatID, userSessions, message.Text)
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Send /add to begin!")
+	messageText := fmt.Sprintf("Send %v to begin!", addOption)
+	msg := tgbotapi.NewMessage(chatID, messageText)
 	_, err := b.api.Send(msg)
-	return err
+	return err*/
+
+	switch message.Text {
+	case addOption:
+		log.Printf("Chat %v: Received %v command", chatID, addOption)
+		return b.startSession(chatID, userSessions)
+	/*case "help": // New command
+	log.Printf("Chat %d: Received /help command", chatID)
+	helpText := "Welcome to the Expenditure Tracking Bot!\n\n" +
+		"Available commands:\n" +
+		"/add - Start adding a new transaction.\n" +
+		"/cancel - Cancel the current operation (if any).\n" +
+		"/help - Show this help message."
+	msg := tgbotapi.NewMessage(chatID, helpText)
+	_, err := b.api.Send(msg)
+	return err*/
+	case transactionsSummaryOption: // It's good practice to have a cancel command
+		log.Printf("Chat %v: Received %v command", chatID, transactionsSummaryOption)
+		categoryCounts, err := storage.GetTransactionCountByCategory()
+		if err != nil {
+			log.Printf("Chat %d: Error getting transaction summary: %v", chatID, err)
+			// Send a generic error message to the user
+			errMsg := tgbotapi.NewMessage(chatID, "Sorry, I couldn't retrieve the transaction summary at this time. Please try again later.")
+			_, sendErr := b.api.Send(errMsg)
+			if sendErr != nil {
+				log.Printf("Chat %d: Error sending summary error message: %v", chatID, sendErr)
+			}
+			return err // Return the original error
+		}
+		var summaryMessageBuilder strings.Builder
+		summaryMessageBuilder.WriteString("Transaction Summary by Category:")
+
+		if len(categoryCounts) == 0 {
+			summaryMessageBuilder.WriteString("\nNo transactions found.")
+		} else {
+			totalExpense := float32(0)
+			for category, count := range categoryCounts {
+				summaryMessageBuilder.WriteString(fmt.Sprintf("\n- %s: %v", category, count))
+				totalExpense += count
+			}
+			summaryMessageBuilder.WriteString(fmt.Sprintf("\n- Total expense: %v", totalExpense))
+		}
+		msg := tgbotapi.NewMessage(chatID, summaryMessageBuilder.String())
+		_, sendErr := b.api.Send(msg)
+		if sendErr != nil {
+			log.Printf("Chat %d: Error sending summary message: %v", chatID, sendErr)
+		}
+		return sendErr
+
+	default:
+		if _, exists := userSessions[chatID]; exists {
+			return b.handleAnswer(chatID, userSessions, message.Text)
+		}
+
+		return b.sendDefaultMessage(chatID)
+	}
 }
 
 // startSession starts a new session for the user.
@@ -79,12 +142,30 @@ func (b *Bot) askCurrentQuestion(chatID int64, userSessions map[int64]*session.U
 	msg := tgbotapi.NewMessage(chatID, question)
 
 	if userSession.CurrentQuestion == session.QuestionName {
-		var quickInputButtons []tgbotapi.InlineKeyboardButton
-		for _, input := range session.QuickInput {
-			quickInputButtons = append(quickInputButtons, tgbotapi.NewInlineKeyboardButtonData(input, input))
+		var keyboardRows [][]tgbotapi.InlineKeyboardButton // Slice of rows
+
+		// Iterate through TransactionCategory, taking two items at a time
+		for i := 0; i < len(session.QuickInput); i += 2 {
+			// Create the first button for the row
+			button1 := tgbotapi.NewInlineKeyboardButtonData(session.QuickInput[i], session.QuickInput[i])
+
+			var rowButtons []tgbotapi.InlineKeyboardButton
+			rowButtons = append(rowButtons, button1)
+
+			// Check if there's a second item for this row
+			if i+1 < len(session.QuickInput) {
+				button2 := tgbotapi.NewInlineKeyboardButtonData(session.QuickInput[i+1], session.QuickInput[i+1])
+				rowButtons = append(rowButtons, button2)
+			}
+
+			// Add the current row (with one or two buttons) to our list of rows
+			keyboardRows = append(keyboardRows, tgbotapi.NewInlineKeyboardRow(rowButtons...))
 		}
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(quickInputButtons...))
-		msg.ReplyMarkup = keyboard
+
+		if len(keyboardRows) > 0 {
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(keyboardRows...)
+			msg.ReplyMarkup = keyboard
+		}
 	}
 
 	if userSession.CurrentQuestion == session.QuestionIsClaimable || userSession.CurrentQuestion == session.QuestionPaidForFamily {
@@ -107,12 +188,30 @@ func (b *Bot) askCurrentQuestion(chatID int64, userSessions map[int64]*session.U
 	}
 
 	if userSession.CurrentQuestion == session.QuestionCategory {
-		var categoryButtons []tgbotapi.InlineKeyboardButton
-		for _, category := range session.TransactionCategory {
-			categoryButtons = append(categoryButtons, tgbotapi.NewInlineKeyboardButtonData(category, category))
+		var keyboardRows [][]tgbotapi.InlineKeyboardButton // Slice of rows
+
+		// Iterate through TransactionCategory, taking two items at a time
+		for i := 0; i < len(session.TransactionCategory); i += 2 {
+			// Create the first button for the row
+			button1 := tgbotapi.NewInlineKeyboardButtonData(session.TransactionCategory[i], session.TransactionCategory[i])
+
+			var rowButtons []tgbotapi.InlineKeyboardButton
+			rowButtons = append(rowButtons, button1)
+
+			// Check if there's a second item for this row
+			if i+1 < len(session.TransactionCategory) {
+				button2 := tgbotapi.NewInlineKeyboardButtonData(session.TransactionCategory[i+1], session.TransactionCategory[i+1])
+				rowButtons = append(rowButtons, button2)
+			}
+
+			// Add the current row (with one or two buttons) to our list of rows
+			keyboardRows = append(keyboardRows, tgbotapi.NewInlineKeyboardRow(rowButtons...))
 		}
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(categoryButtons...))
-		msg.ReplyMarkup = keyboard
+
+		if len(keyboardRows) > 0 {
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(keyboardRows...)
+			msg.ReplyMarkup = keyboard
+		}
 	}
 
 	_, err := b.api.Send(msg)
@@ -121,8 +220,16 @@ func (b *Bot) askCurrentQuestion(chatID int64, userSessions map[int64]*session.U
 
 // handleAnswer processes the user's answer.
 func (b *Bot) handleAnswer(chatID int64, individualSession map[int64]*session.UserSession, answer string) error {
+	if answer == addOption {
+		return b.startSession(chatID, individualSession)
+	}
+
 	err := individualSession[chatID].HandleAnswer(answer)
 	if err != nil {
+		messageErr := b.sendDefaultMessage(chatID)
+		if messageErr != nil {
+			return errors.New(err.Error() + " " + messageErr.Error())
+		}
 		return err
 	}
 
@@ -164,7 +271,7 @@ func (b *Bot) completeSession(chatID int64, session *session.UserSession) error 
 		return err
 	}
 
-	_, err = b.api.Send(tgbotapi.NewMessage(chatID, "Send /add to begin!"))
+	err = b.sendDefaultMessage(chatID)
 	if err != nil {
 		return err
 	}
@@ -235,4 +342,11 @@ func (b *Bot) handleCallbackQuery(callbackQuery *tgbotapi.CallbackQuery, userSes
 	}
 
 	return nil
+}
+
+func (b *Bot) sendDefaultMessage(chatID int64) error {
+	messageText := fmt.Sprintf("Send %v to add new transaction or %v to view summary!", addOption, transactionsSummaryOption)
+	_, err := b.api.Send(tgbotapi.NewMessage(chatID, messageText))
+
+	return err
 }
