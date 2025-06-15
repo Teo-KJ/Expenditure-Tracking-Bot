@@ -208,3 +208,111 @@ func GetTransactionCountByCategory() (map[string]float32, error) {
 	log.Printf("Successfully retrieved transaction counts for %d categories.", len(categoryCounts))
 	return categoryCounts, nil
 }
+
+// GetTotalAmountByPaidForFamily retrieves the total sum of amounts grouped by the 'paid_for_family' status.
+func GetTotalAmountByPaidForFamily() (map[bool]float32, error) {
+	querySQL := `
+		SELECT
+			paid_for_family,
+			SUM(amount) AS total_amount
+		FROM
+			transactions
+		GROUP BY
+			paid_for_family
+		ORDER BY
+			paid_for_family;
+	`
+	amountByPaidForFamily := make(map[bool]float32)
+
+	currentDB, err := GetDB()
+	if err != nil {
+		log.Printf("Error getting DB connection for 'paid_for_family' totals: %v", err)
+		return nil, fmt.Errorf("failed to get DB connection: %w", err)
+	}
+
+	rows, err := currentDB.Query(querySQL)
+	if err != nil {
+		log.Printf("Error querying transaction totals by 'paid_for_family': %v (SQL: %s)", err, querySQL)
+		return nil, fmt.Errorf("database query for 'paid_for_family' totals failed: %w", err)
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Error closing rows for 'paid_for_family' totals: %v", err)
+		}
+	}(rows)
+
+	for rows.Next() {
+		var paidForFamilyStatus bool
+		var totalAmount float32
+		// Handle potential NULL values for SUM(amount) if a group has no non-NULL amounts,
+		// though SUM usually returns 0 for empty groups or NULL if all inputs are NULL.
+		// Using sql.NullFloat64 might be more robust if SUM can return NULL.
+		// For simplicity, assuming SUM(amount) will return a float32 (or 0).
+		if err := rows.Scan(&paidForFamilyStatus, &totalAmount); err != nil {
+			log.Printf("Error scanning 'paid_for_family' total row: %v", err)
+			return nil, fmt.Errorf("failed to scan 'paid_for_family' total row: %w", err)
+		}
+		amountByPaidForFamily[paidForFamilyStatus] = totalAmount
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating 'paid_for_family' total rows: %v", err)
+		return nil, fmt.Errorf("error during 'paid_for_family' total row iteration: %w", err)
+	}
+
+	log.Printf("Successfully retrieved transaction totals by 'paid_for_family' status for %d groups.", len(amountByPaidForFamily))
+	return amountByPaidForFamily, nil
+}
+
+// GetTotalAmountByIsClaimable retrieves the total sum of amounts grouped by the 'is_claimable' status.
+func GetTotalAmountByIsClaimable() (map[bool]float32, error) {
+	querySQL := `
+		SELECT
+			is_claimable,
+			SUM(amount) AS total_amount
+		FROM
+			transactions
+		GROUP BY
+			is_claimable
+		ORDER BY
+			is_claimable;
+	`
+	amountByIsClaimable := make(map[bool]float32)
+
+	currentDB, err := GetDB()
+	if err != nil {
+		log.Printf("Error getting DB connection for 'is_claimable' totals: %v", err)
+		return nil, fmt.Errorf("failed to get DB connection: %w", err)
+	}
+
+	rows, err := currentDB.Query(querySQL)
+	if err != nil {
+		log.Printf("Error querying transaction totals by 'is_claimable': %v (SQL: %s)", err, querySQL)
+		return nil, fmt.Errorf("database query for 'is_claimable' totals failed: %w", err)
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Error closing rows for 'is_claimable' totals: %v", err)
+		}
+	}(rows)
+
+	for rows.Next() {
+		var isClaimableStatus bool
+		var totalAmount float32
+		if err := rows.Scan(&isClaimableStatus, &totalAmount); err != nil {
+			log.Printf("Error scanning 'is_claimable' total row: %v", err)
+			return nil, fmt.Errorf("failed to scan 'is_claimable' total row: %w", err)
+		}
+		amountByIsClaimable[isClaimableStatus] = totalAmount
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating 'is_claimable' total rows: %v", err)
+		return nil, fmt.Errorf("error during 'is_claimable' total row iteration: %w", err)
+	}
+
+	log.Printf("Successfully retrieved transaction totals by 'is_claimable' status for %d groups.", len(amountByIsClaimable))
+	return amountByIsClaimable, nil
+}
