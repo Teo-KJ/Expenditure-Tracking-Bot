@@ -83,7 +83,7 @@ func createTableIfNotExists() error {
 // to interact with the database.
 func GetDB() (*sql.DB, error) {
 	if db == nil {
-		return nil, errors.New("Database connection pool is not initialized. Call InitDB first.")
+		return nil, errors.New("database connection pool is not initialized, call InitDB first")
 	}
 	return db, nil
 }
