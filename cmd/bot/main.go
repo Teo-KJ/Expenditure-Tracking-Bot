@@ -34,7 +34,7 @@ func main() {
 		defer storage.CloseDB()
 	}
 
-	myBot, err := bot.NewBot(cfg.TelegramConfig.Token)
+	myBot, err := bot.NewBot(cfg.TelegramConfig.Token, cfg.FrequentExpenses)
 	if err != nil {
 		log.Panic(err)
 	}

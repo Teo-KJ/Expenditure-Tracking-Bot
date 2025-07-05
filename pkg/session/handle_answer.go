@@ -19,11 +19,6 @@ func (s *UserSession) HandleAnswer(answer string) error {
 			// Return a user-friendly error message
 			return fmt.Errorf("invalid amount: %w. Please enter a valid number", err)
 		}
-
-		if len(DefaultCurrency(s.Answers.Name)) > 0 {
-			s.Answers.Currency = DefaultCurrency(s.Answers.Name)
-			s.CurrentQuestion++
-		}
 	case QuestionCurrency:
 		// TODO: Consider adding validation for currency (e.g., check if 'answer' is in 'Currencies' list)
 		s.Answers.Currency = answer
