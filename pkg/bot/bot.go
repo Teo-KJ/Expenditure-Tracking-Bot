@@ -184,7 +184,7 @@ func (b *Bot) askCurrentQuestion(chatID int64, userSessions map[int64]*session.U
 		if userSession.CurrentQuestion > session.QuestionPaidForFamily {
 			summaryParts = append(summaryParts, fmt.Sprintf("*Paid for Family:* %t", answers.PaidForFamily))
 		}
-		if answers.Category != "" { // Category can be auto-filled
+		if answers.Category != "" { // Category can be autofilled
 			summaryParts = append(summaryParts, fmt.Sprintf("*Category:* %s", tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, answers.Category)))
 		}
 
@@ -243,7 +243,7 @@ func (b *Bot) askCurrentQuestion(chatID int64, userSessions map[int64]*session.U
 
 	if userSession.CurrentQuestion == session.QuestionCurrency {
 		var currencyButtons []tgbotapi.InlineKeyboardButton
-		for _, currency := range session.Currencies {
+		for _, currency := range b.currencies {
 			currencyButtons = append(currencyButtons, tgbotapi.NewInlineKeyboardButtonData(currency, currency))
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(currencyButtons...))
