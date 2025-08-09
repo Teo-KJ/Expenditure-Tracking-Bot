@@ -6,7 +6,7 @@ import (
 )
 
 // HandleAnswer processes the user's answer, updates the session,
-// applies auto-fill logic, and skips already answered questions.
+// applies autofill logic, and skips already answered questions.
 func (s *UserSession) HandleAnswer(answer string) error {
 	var err error
 

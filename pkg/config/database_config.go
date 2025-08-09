@@ -1,6 +1,6 @@
 package config
 
-// Define structs matching the YAML structure
+// DatabaseConfig define the configs needed to connect to the DB
 type DatabaseConfig struct {
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"`
