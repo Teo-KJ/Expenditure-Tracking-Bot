@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json" // To work with JSON data
 	"fmt"
+	"github.com/rs/cors"
 	"gopkg.in/yaml.v3"
 	"log"
 	"main/pkg/config"
@@ -10,8 +11,9 @@ import (
 	"main/pkg/transaction" // Assuming your Transaction struct is here
 	"net/http"             // The core HTTP package
 	"os"                   // To potentially read port from environment
-	"strconv"              // To parse boolean and integer query parameters
-	"time"                 // For example data
+	"regexp"
+	"strconv" // To parse boolean and integer query parameters
+	"time"    // For example data
 )
 
 // Define a struct for example JSON responses
@@ -242,10 +244,24 @@ func main() {
 		log.Println("Database not configured. Transactions API might not function as expected if DB is required.")
 	}
 
+	mux := http.NewServeMux()
 	// --- Register Handlers ---
-	http.HandleFunc("/health", healthCheckHandler)
-	http.HandleFunc("/api/v1/example", exampleHandler)
-	http.HandleFunc("/api/v1/transactions", transactionsHandler)
+	mux.HandleFunc("/health", healthCheckHandler)
+	mux.HandleFunc("/api/v1/example", exampleHandler)
+	mux.HandleFunc("/api/v1/transactions", transactionsHandler)
+
+	// --- CORS Middleware ---
+	c := cors.New(cors.Options{
+		AllowedOrigins: []string{"http://localhost:3000", "http://192.168.1.11:3000"},
+		AllowOriginFunc: func(origin string) bool {
+			match, _ := regexp.MatchString(`^https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}):\d+$`, origin)
+			return match
+		},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Authorization"},
+	})
+
+	handler := c.Handler(mux)
 
 	// --- Configure and Start Server ---
 	port := "8081"
@@ -253,9 +269,10 @@ func main() {
 
 	log.Printf("Starting HTTP server on %s", serverAddr)
 
-	log.Printf("The available endpoints:\nHealth check endpoint: localhost:%v/health\nTransactions API endpoint: localhost:%v/api/v1/transactions", port, port)
+	log.Printf("The available endpoints:\nHealth check endpoint: localhost:%v/health\nTransactions API endpoint: localhost:%v/api/v1/transactions",
+		port, port)
 
-	err = http.ListenAndServe(serverAddr, nil)
+	err = http.ListenAndServe(serverAddr, handler)
 	if err != nil {
 		log.Fatalf("HTTP server failed to start: %v", err)
 	}
