@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json" // To work with JSON data
 	"fmt"
+	"github.com/patrickmn/go-cache"
 	"github.com/rs/cors"
 	"gopkg.in/yaml.v3"
 	"log"
@@ -13,7 +14,7 @@ import (
 	"os"                   // To potentially read port from environment
 	"regexp"
 	"strconv" // To parse boolean and integer query parameters
-	"time"    // For example data
+	"time"
 )
 
 // Define a struct for example JSON responses
@@ -34,6 +35,9 @@ type PaginatedTransactionsResponse struct {
 	TotalItems   int                       `json:"totalItems"`
 	TotalPages   int                       `json:"totalPages"`
 }
+
+// --- Global Cache ---
+var c = cache.New(5*time.Minute, 10*time.Minute)
 
 // --- Handler Functions ---
 
@@ -60,29 +64,61 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Served %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 }
 
-// exampleHandler provides a simple example endpoint.
-func exampleHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	response := MessageResponse{
-		Message: "Hello from the Go backend!",
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	err := json.NewEncoder(w).Encode(response)
+// getPrefilledExpensesHandler creates an HTTP handler that serves the list
+// of pre-filled expenses from the configuration.
+func getPrefilledExpensesHandler(expenses []config.FrequentExpense) http.HandlerFunc {
+	// Cache the response indefinitely since it's based on config
+	prefilledExpensesJSON, err := json.Marshal(expenses)
 	if err != nil {
-		log.Printf("Error encoding example response JSON: %v", err)
+		// This would be a startup-time error, so logging it fatally is reasonable.
+		log.Fatalf("Failed to marshal pre-filled expenses: %v", err)
 	}
-	log.Printf("Served %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+	c.Set("prefilled-expenses", prefilledExpensesJSON, cache.NoExpiration)
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Serve from cache
+		if cachedJSON, found := c.Get("prefilled-expenses"); found {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(cachedJSON.([]byte))
+			if err != nil {
+				return
+			}
+			log.Printf("Served %s %s from cache", r.Method, r.URL.Path)
+			return
+		}
+
+		// Fallback (should not happen if cache is pre-warmed)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		err = json.NewEncoder(w).Encode(expenses)
+		if err != nil {
+			return
+		}
+	}
 }
 
 // getTransactionsHandler retrieves transactions, allowing filtering and pagination.
 func getTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
+	cacheKey := r.URL.String() // Use the full URL as the cache key
+
+	// Check cache first
+	if cachedResponse, found := c.Get(cacheKey); found {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		err := json.NewEncoder(w).Encode(cachedResponse)
+		if err != nil {
+			return
+		}
+		log.Printf("Served %s %s from cache", r.Method, r.URL.Path)
+		return
+	}
 
 	// Filtering parameters
 	categoryFilter := queryParams.Get("category")
@@ -133,17 +169,8 @@ func getTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid value for 'limit' parameter. Must be a positive integer.", http.StatusBadRequest)
 			return
 		}
-		// Optional: You might want to set a maximum limit
-		// if limit > 100 {
-		// 	limit = 100 // Cap the limit to prevent abuse
-		// }
 	}
 
-	log.Printf("Fetching transactions with filters - Category: '%s', IsClaimable: %v, PaidForFamily: %v, Page: %d, Limit: %d",
-		categoryFilter, isClaimableFilter, paidForFamilyFilter, page, limit)
-
-	// Fetch data from storage using the filters and pagination parameters
-	// storage.GetAllTransactionsFromDB will need to be updated to return totalItems as well.
 	transactions, totalItems, err := storage.GetAllTransactionsFromDB(
 		categoryFilter,
 		isClaimableFilter,
@@ -157,7 +184,6 @@ func getTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Calculate total pages
 	totalPages := 0
 	if totalItems > 0 && limit > 0 {
 		totalPages = (totalItems + limit - 1) / limit // Ceiling division
@@ -171,12 +197,14 @@ func getTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 		TotalPages:   totalPages,
 	}
 
+	// Store in cache
+	c.Set(cacheKey, response, cache.DefaultExpiration)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
-		log.Printf("Error encoding transactions JSON: %v", err)
+		return
 	}
 	log.Printf("Served %s %s with %d transactions (page %d, limit %d, total %d) from %s",
 		r.Method, r.URL.Path, len(transactions), page, limit, totalItems, r.RemoteAddr)
@@ -190,12 +218,15 @@ func createTransactionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert the new transaction into the database
 	if err := storage.InsertTransaction(newTransaction); err != nil {
 		log.Printf("Error inserting transaction: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	// Invalidate cache
+	c.Flush()
+	log.Println("Cache flushed due to new transaction")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -232,8 +263,6 @@ func main() {
 	}
 
 	if cfg.FeaturesConfig.SaveToDB {
-		// Initialize Database
-		// Assuming storage.InitDB takes config.DatabaseConfig
 		err = storage.InitDB(cfg.Database)
 		if err != nil {
 			log.Fatalf("Failed to initialize database: %v", err)
@@ -245,13 +274,13 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	// --- Register Handlers ---
 	mux.HandleFunc("/health", healthCheckHandler)
-	mux.HandleFunc("/api/v1/example", exampleHandler)
 	mux.HandleFunc("/api/v1/transactions", transactionsHandler)
 
-	// --- CORS Middleware ---
-	c := cors.New(cors.Options{
+	prefilledHandler := getPrefilledExpensesHandler(cfg.FrequentExpenses)
+	mux.HandleFunc("/api/v1/prefilled-expenses", prefilledHandler)
+
+	corsMiddleware := cors.New(cors.Options{
 		AllowedOrigins: []string{"http://localhost:3000", "http://192.168.1.11:3000"},
 		AllowOriginFunc: func(origin string) bool {
 			match, _ := regexp.MatchString(`^https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}):\d+$`, origin)
@@ -261,9 +290,8 @@ func main() {
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	})
 
-	handler := c.Handler(mux)
+	handler := corsMiddleware.Handler(mux)
 
-	// --- Configure and Start Server ---
 	port := "8081"
 	serverAddr := fmt.Sprintf(":%s", port)
 
